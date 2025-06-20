@@ -80,3 +80,45 @@ export const downloadVideoFromURL = async (videoUrl: string): Promise<Buffer> =>
 
   return Buffer.from(response.data);
 };
+
+/**
+ * 上传视频文件到 Cloudflare R2 (用于完整视频处理流程)
+ */
+export async function uploadVideoFileToR2(
+  fileBuffer: Buffer,
+  originalName: string,
+  userId: number
+): Promise<UploadResult> {
+  try {
+    // 生成唯一的文件路径
+    const fileExtension = originalName.split('.').pop() || 'mp4';
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
+    const key = `videos/${userId}/${fileName}`;
+
+    console.log(`开始上传视频到R2: ${key}`);
+
+    // 创建上传命令
+    const command = new PutObjectCommand({
+      Bucket: config.cloudflareR2.bucketName,
+      Key: key,
+      Body: fileBuffer,
+      ContentType: 'video/mp4',
+    });
+
+    // 执行上传
+    await s3Client.send(command);
+
+    // 构造公共访问URL
+    const url = `${config.cloudflareR2.publicUrl}/${key}`;
+
+    console.log(`视频上传R2成功: ${url}`);
+
+    return {
+      url,
+      key,
+    };
+  } catch (error) {
+    console.error('上传视频到R2失败:', error);
+    throw new Error('视频上传失败');
+  }
+}

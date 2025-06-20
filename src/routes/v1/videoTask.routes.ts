@@ -10,16 +10,21 @@ const videoTaskController = new VideoTaskController();
 router.post('/', 
   authenticate,
   validate(videoTaskValidation.createTask), 
-  videoTaskController.createTask
+  videoTaskController.createTask.bind(videoTaskController)
+);
+
+router.get('/', 
+  authenticate,
+  videoTaskController.getUserTasks.bind(videoTaskController)
 );
 
 router.get('/:taskId', 
   authenticate,
-  videoTaskController.getTaskStatus
+  videoTaskController.getTaskStatus.bind(videoTaskController)
 );
 
 router.post('/freepik_callback', 
-  videoTaskController.freepikCallback
+  videoTaskController.freepikCallback.bind(videoTaskController)
 );
 
 export default router;

@@ -31,6 +31,7 @@ const config = {
   
   freepik: {
     apiUrl: process.env.FREEPIK_API_URL || '',
+    apiKey: process.env.FREEPIK_API_KEY || '',
     webhookUrl: process.env.FREEPIK_WEBHOOK_URL || '',
   },
   
