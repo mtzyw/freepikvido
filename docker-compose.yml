@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: video-backend-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: video_backend
+      MYSQL_USER: video_user
+      MYSQL_PASSWORD: video_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    networks:
+      - video-backend-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: video-backend-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - video-backend-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: video-backend-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://video_user:video_password@mysql:3306/video_backend
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - .:/app
+      - /app/node_modules
+    networks:
+      - video-backend-network
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: video-backend-worker
+    restart: unless-stopped
+    command: ["node", "dist/workers/videoProcessor.worker.js"]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: mysql://video_user:video_password@mysql:3306/video_backend
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - mysql
+      - redis
+      - app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    networks:
+      - video-backend-network
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  video-backend-network:
+    driver: bridge

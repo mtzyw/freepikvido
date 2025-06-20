@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Provider {
+  local
+  apple
+  google
+  canva
+}
+
+enum TaskType {
+  image_to_video
+  text_to_video
+}
+
+enum TaskStatus {
+  pending
+  processing
+  success
+  failed
+}
+
+enum OrderStatus {
+  pending
+  paid
+  failed
+  refunded
+  cancelled
+}
+
+enum PaymentMethod {
+  apple
+  stripe
+  other
+}
+
+model User {
+  id               Int              @id @default(autoincrement())
+  email            String?
+  passwordHash     String?          @map("password_hash")
+  name             String?          @db.VarChar(50)
+  provider         Provider         @default(local)
+  providerUserId   String?          @map("provider_user_id")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  
+  videoTasks       VideoTask[]
+  orders           Order[]
+  userMemberships  UserMembership[]
+  
+  @@unique([email, provider])
+  @@unique([provider, providerUserId])
+  @@map("users")
+}
+
+model VideoTask {
+  taskId          String      @id @default(uuid()) @map("task_id")
+  userId          Int         @map("user_id")
+  taskType        TaskType    @map("task_type")
+  prompt          String?     @db.Text
+  imageUrl        String?     @map("image_url")
+  thumbnailUrl    String?     @map("thumbnail_url")
+  durationSeconds Int         @map("duration_seconds")
+  aspectRatio     String?     @map("aspect_ratio") @db.VarChar(20)
+  negativePrompt  String?     @map("negative_prompt") @db.Text
+  cfgScale        Decimal     @default(0.5) @map("cfg_scale") @db.Decimal(3, 2)
+  staticMaskUrl   String?     @map("static_mask_url")
+  status          TaskStatus  @default(pending)
+  videoUrl        String?     @map("video_url")
+  errorMsg        String?     @map("error_msg") @db.Text
+  freepikTaskId   String?     @map("freepik_task_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([status])
+  @@index([freepikTaskId])
+  @@map("video_tasks")
+}
+
+model Product {
+  productId      Int              @id @default(autoincrement()) @map("product_id")
+  name           String           @db.VarChar(50)
+  price          Decimal          @db.Decimal(10, 2)
+  durationDays   Int              @map("duration_days")
+  description    String?          @db.Text
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  
+  orders         Order[]
+  userMemberships UserMembership[]
+  
+  @@map("products")
+}
+
+model Order {
+  orderId        Int            @id @default(autoincrement()) @map("order_id")
+  userId         Int            @map("user_id")
+  productId      Int            @map("product_id")
+  status         OrderStatus    @default(pending)
+  paymentMethod  PaymentMethod? @map("payment_method")
+  transactionId  String?        @map("transaction_id")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [productId], onDelete: Restrict)
+  
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+}
+
+model UserMembership {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  productId   Int      @map("product_id")
+  startAt     DateTime @map("start_at")
+  expireAt    DateTime @map("expire_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [productId], onDelete: Restrict)
+  
+  @@unique([userId, productId])
+  @@index([expireAt])
+  @@index([userId])
+  @@map("user_memberships")
+}
+
+model ApiKey {
+  id          Int      @id @default(autoincrement())
+  apiKey      String   @map("api_key") @db.VarChar(100)
+  dailyLimit  Int      @map("daily_limit")
+  usedCount   Int      @default(0) @map("used_count")
+  lastReset   DateTime @map("last_reset")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@index([lastReset])
+  @@index([isActive])
+  @@map("api_keys")
+}
