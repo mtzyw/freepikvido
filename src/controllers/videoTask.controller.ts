@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { VideoTaskService } from '../services/videoTask.service';
 import { processVideo } from '../utils/videoHandler';
+import NodeCache from 'node-cache';
 
 interface ApiError extends Error {
   statusCode?: number;
@@ -9,12 +10,15 @@ interface ApiError extends Error {
 
 export class VideoTaskController {
   private videoTaskService: VideoTaskService;
+  private taskCache: NodeCache;
 
   constructor() {
     this.videoTaskService = new VideoTaskService();
+    // 创建缓存实例，TTL为5秒
+    this.taskCache = new NodeCache({ stdTTL: 5, checkperiod: 6 });
   }
 
-  async createTask(req: Request, res: Response, next: NextFunction) {
+  async createTask(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = (req as any).userId;
       const { 
@@ -58,11 +62,26 @@ export class VideoTaskController {
     }
   }
 
-  async getTaskStatus(req: Request, res: Response, next: NextFunction) {
+  async getTaskStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { taskId } = req.params;
       const userId = (req as any).userId;
+      const cacheKey = `task_${taskId}_${userId}`;
 
+      // 检查缓存
+      const cachedTask = this.taskCache.get(cacheKey);
+      if (cachedTask) {
+        console.log(`缓存命中: ${cacheKey}`);
+        res.status(200).json({
+          success: true,
+          message: '获取任务状态成功',
+          data: cachedTask,
+        });
+        return;
+      }
+
+      console.log(`缓存未命中，查询数据库: ${cacheKey}`);
+      // 缓存未命中，查询数据库
       const task = await this.videoTaskService.getTaskById(taskId, userId);
 
       if (!task) {
@@ -72,21 +91,27 @@ export class VideoTaskController {
         throw error;
       }
 
+      const taskData = {
+        task_id: task.taskId,
+        task_type: task.taskType,
+        status: task.status,
+        prompt: task.prompt,
+        image_url: task.imageUrl,
+        thumbnail_url: task.thumbnailUrl,
+        video_url: task.videoUrl,
+        duration_seconds: task.durationSeconds,
+        created_at: task.createdAt,
+        updated_at: task.updatedAt,
+      };
+
+      // 存入缓存
+      this.taskCache.set(cacheKey, taskData);
+      console.log(`数据已缓存: ${cacheKey}`);
+
       res.status(200).json({
         success: true,
         message: '获取任务状态成功',
-        data: {
-          task_id: task.taskId,
-          task_type: task.taskType,
-          status: task.status,
-          prompt: task.prompt,
-          image_url: task.imageUrl,
-          thumbnail_url: task.thumbnailUrl,
-          video_url: task.videoUrl,
-          duration_seconds: task.durationSeconds,
-          created_at: task.createdAt,
-          updated_at: task.updatedAt,
-        },
+        data: taskData,
       });
     } catch (error) {
       const apiError = error as ApiError;
@@ -98,7 +123,7 @@ export class VideoTaskController {
     }
   }
 
-  async getUserTasks(req: Request, res: Response, next: NextFunction) {
+  async getUserTasks(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = (req as any).userId;
       const { page = 1, limit = 10 } = req.query;
@@ -138,11 +163,9 @@ export class VideoTaskController {
     }
   }
 
-  async freepikCallback(req: Request, res: Response, next: NextFunction) {
+  async freepikCallback(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      // TODO: 添加IP白名单或签名验证确保请求来自Freepik
-      
-      console.log('收到原始回调数据:', JSON.stringify(req.body, null, 2));
+      // ✅ 已添加Webhook安全认证：频率限制 + 签名验证 + 请求格式校验
       
       // 检查回调格式 - Freepik直接发送data字段作为根对象
       let callbackData;
@@ -159,7 +182,8 @@ export class VideoTaskController {
       const { task_id, status, generated, error_message } = callbackData;
       const video_url = generated && generated.length > 0 ? generated[0] : null;
       
-      console.log('解析后的回调数据:', { task_id, status, video_url });
+      // 安全日志记录：只记录非敏感字段
+      console.log('收到Freepik回调:', { task_id, status, timestamp: new Date().toISOString() });
 
       // 根据Freepik任务ID查找内部任务
       const task = await this.videoTaskService.getTaskByFreepikId(task_id);
@@ -183,6 +207,10 @@ export class VideoTaskController {
             undefined,
             'Freepik任务完成但未返回视频URL'
           );
+          // 清除缓存
+          const cacheKey = `task_${task.taskId}_${task.userId}`;
+          this.taskCache.del(cacheKey);
+          console.log(`任务失败（无视频URL），缓存已清除: ${cacheKey}`);
         }
       } else {
         // 失败状态：更新错误信息
@@ -193,6 +221,10 @@ export class VideoTaskController {
           undefined,
           error_message || `视频生成失败，状态：${status}`
         );
+        // 清除缓存
+        const cacheKey = `task_${task.taskId}_${task.userId}`;
+        this.taskCache.del(cacheKey);
+        console.log(`任务失败（${status}），缓存已清除: ${cacheKey}`);
       }
 
       res.status(200).json({
@@ -230,6 +262,11 @@ export class VideoTaskController {
         null // 清空错误信息
       );
       
+      // 清除缓存，让前端立即获取最新状态
+      const cacheKey = `task_${task.taskId}_${task.userId}`;
+      this.taskCache.del(cacheKey);
+      console.log(`任务完成，缓存已清除: ${cacheKey}`);
+      
       console.log(`任务 ${task.taskId} 处理完成，最终视频URL: ${finalVideoUrl}`);
     } catch (error) {
       console.error('处理成功任务失败:', error);
@@ -241,6 +278,11 @@ export class VideoTaskController {
         undefined,
         `视频处理失败: ${(error as Error).message}`
       );
+      
+      // 清除缓存，确保错误状态也能立即反映
+      const cacheKey = `task_${task.taskId}_${task.userId}`;
+      this.taskCache.del(cacheKey);
+      console.log(`任务失败，缓存已清除: ${cacheKey}`);
     }
   }
 }

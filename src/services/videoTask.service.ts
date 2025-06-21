@@ -1,8 +1,7 @@
-import { PrismaClient, VideoTask, TaskStatus, TaskType } from '@prisma/client';
+import { VideoTask, TaskStatus, TaskType } from '@prisma/client';
 import { FreepikService, FreepikTaskRequest } from './freepik.service';
 import config from '../config';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 interface CreateTaskData {
   userId: number;
@@ -28,31 +27,45 @@ export class VideoTaskService {
       throw new Error('图生视频任务需要提供图片URL');
     }
 
-    // 创建任务记录
-    const task = await prisma.videoTask.create({
-      data: {
-        userId: data.userId,
-        taskType: data.taskType,
-        prompt: data.prompt,
-        durationSeconds: data.durationSeconds,
-        imageUrl: data.imageUrl,
-        thumbnailUrl: data.imageUrl, // thumbnail_url 直接使用 image_url 的值
-        negativePrompt: data.negativePrompt,
-        cfgScale: data.cfgScale,
-        staticMaskUrl: data.staticMaskUrl,
-        aspectRatio: data.aspectRatio,
-        status: TaskStatus.pending,
-      },
-    });
+    // 使用事务确保数据一致性
+    return await prisma.$transaction(async (tx) => {
+      // 检查用户是否存在
+      const user = await tx.user.findUnique({
+        where: { id: data.userId }
+      });
+      
+      if (!user) {
+        throw new Error('用户不存在');
+      }
 
-    // 异步提交到Freepik API
-    this.submitToFreepikAPI(task).catch(error => {
-      console.error('提交Freepik API失败:', error);
-      // 更新任务状态为失败
-      this.updateTaskStatus(task.taskId, TaskStatus.failed, undefined, undefined, error.message);
-    });
+      // 创建任务记录
+      const task = await tx.videoTask.create({
+        data: {
+          userId: data.userId,
+          taskType: data.taskType,
+          prompt: data.prompt,
+          durationSeconds: data.durationSeconds,
+          imageUrl: data.imageUrl,
+          thumbnailUrl: data.imageUrl, // thumbnail_url 直接使用 image_url 的值
+          negativePrompt: data.negativePrompt,
+          cfgScale: data.cfgScale,
+          staticMaskUrl: data.staticMaskUrl,
+          aspectRatio: data.aspectRatio,
+          status: TaskStatus.pending,
+        },
+      });
 
-    return task;
+      // 异步提交到Freepik API（在事务外进行）
+      setImmediate(() => {
+        this.submitToFreepikAPI(task).catch(error => {
+          console.error('提交Freepik API失败:', error);
+          // 更新任务状态为失败
+          this.updateTaskStatus(task.taskId, TaskStatus.failed, undefined, undefined, error.message);
+        });
+      });
+
+      return task;
+    });
   }
 
   async getTaskById(taskId: string, userId: number): Promise<VideoTask | null> {

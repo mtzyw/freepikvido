@@ -1,8 +1,11 @@
 import app from './app';
 import config from './config';
-import { PrismaClient } from '@prisma/client';
+import prisma from './lib/prisma';
+import { validateEnvironmentVariables, checkEnvFileSecurity } from './utils/envValidator';
 
-const prisma = new PrismaClient();
+// 启动前验证环境变量
+validateEnvironmentVariables();
+checkEnvFileSecurity();
 
 async function startServer() {
   try {

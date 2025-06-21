@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { VideoTaskController } from '../../controllers/videoTask.controller';
 import { authenticate } from '../../middleware/auth.middleware';
 import { validate } from '../../middleware/validation.middleware';
+import { freepikWebhookAuth } from '../../middleware/webhookAuth.middleware';
 import { videoTaskValidation } from '../../utils/validations';
 
 const router = Router();
@@ -23,7 +24,8 @@ router.get('/:taskId',
   videoTaskController.getTaskStatus.bind(videoTaskController)
 );
 
-router.post('/freepik_callback', 
+router.post('/freepik_callback',
+  freepikWebhookAuth,
   videoTaskController.freepikCallback.bind(videoTaskController)
 );
 

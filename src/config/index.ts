@@ -33,6 +33,7 @@ const config = {
     apiUrl: process.env.FREEPIK_API_URL || '',
     apiKey: process.env.FREEPIK_API_KEY || '',
     webhookUrl: process.env.FREEPIK_WEBHOOK_URL || '',
+    // webhookSecret: Freepik不支持自定义Webhook配置
   },
   
   canva: {

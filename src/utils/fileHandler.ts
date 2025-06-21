@@ -23,16 +23,49 @@ export const uploadImageToR2 = async (
   originalName: string,
   userId: number
 ): Promise<UploadResult> => {
-  const processedBuffer = await sharp(buffer)
-    .resize(2048, 2048, { 
-      fit: 'inside',
-      withoutEnlargement: true 
-    })
-    .jpeg({ quality: 90 })
-    .toBuffer();
+  // 验证文件大小 (10MB限制)
+  const maxSize = 10 * 1024 * 1024;
+  if (buffer.length > maxSize) {
+    throw new Error('文件大小超过限制(10MB)');
+  }
 
-  const fileExtension = originalName.split('.').pop() || 'jpg';
-  const fileName = `${uuidv4()}.${fileExtension}`;
+  // 验证并清理文件名
+  const sanitizedName = originalName.replace(/[^a-zA-Z0-9.-]/g, '');
+  const fileExtension = sanitizedName.split('.').pop()?.toLowerCase() || 'jpg';
+  
+  // 限制允许的文件扩展名
+  const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+  if (!allowedExtensions.includes(fileExtension)) {
+    throw new Error(`不支持的文件格式，只允许: ${allowedExtensions.join(', ')}`);
+  }
+
+  // 使用Sharp验证和处理图片
+  let processedBuffer: Buffer;
+  try {
+    const image = sharp(buffer);
+    const metadata = await image.metadata();
+    
+    // 验证图片尺寸
+    if (!metadata.width || !metadata.height) {
+      throw new Error('无法读取图片尺寸信息');
+    }
+    
+    if (metadata.width > 8192 || metadata.height > 8192) {
+      throw new Error('图片尺寸过大，最大支持8192x8192像素');
+    }
+
+    processedBuffer = await image
+      .resize(2048, 2048, { 
+        fit: 'inside',
+        withoutEnlargement: true 
+      })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  } catch (error) {
+    throw new Error('图片格式无效或已损坏');
+  }
+
+  const fileName = `${uuidv4()}.jpg`; // 统一转换为jpg
   const key = `uploads/images/${userId}/${fileName}`;
 
   const command = new PutObjectCommand({
@@ -90,9 +123,17 @@ export async function uploadVideoFileToR2(
   userId: number
 ): Promise<UploadResult> {
   try {
-    // 生成唯一的文件路径
-    const fileExtension = originalName.split('.').pop() || 'mp4';
-    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
+    // 安全地生成唯一的文件路径
+    const sanitizedName = originalName.replace(/[^a-zA-Z0-9.-]/g, '');
+    const fileExtension = sanitizedName.split('.').pop()?.toLowerCase() || 'mp4';
+    
+    // 验证文件扩展名
+    const allowedExtensions = ['mp4', 'mov', 'avi', 'mkv'];
+    if (!allowedExtensions.includes(fileExtension)) {
+      throw new Error(`不支持的视频格式，只允许: ${allowedExtensions.join(', ')}`);
+    }
+    
+    const fileName = `${Date.now()}_${uuidv4()}.mp4`; // 统一使用mp4格式
     const key = `videos/${userId}/${fileName}`;
 
     console.log(`开始上传视频到R2: ${key}`);
